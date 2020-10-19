@@ -1,0 +1,159 @@
+module Workflow where
+
+import Daml.Script
+
+data ClientData = ClientData
+  with
+    name : Text
+    address : Text
+    city : Text
+    postalCode : Text
+    country : Text
+  deriving (Eq, Show)
+
+template KYCRequest
+  with
+    sales : Party
+    operations : Party
+    compliance : Party
+    clientData : ClientData
+  where
+    signatory sales
+    observer operations, compliance
+
+    controller operations can
+      nonconsuming RequestCip : ContractId CipRequest
+        with
+          provider : Party
+        do
+          create CipRequest with ..
+            
+      nonconsuming RequestCdd : ContractId CddRequest
+        with
+          provider : Party
+        do
+          create CddRequest with ..
+
+    controller compliance can
+      CompleteOnboarding : ContractId KYCRecord
+        with
+          cipResponseCid : ContractId CipResponse
+          cddResponseCid : ContractId CddResponse
+        do
+          cipData <- fetch cipResponseCid
+          exercise cipResponseCid DeleteCip
+          cddData <- fetch cddResponseCid
+          exercise cddResponseCid DeleteCdd
+          create KYCRecord with ..
+
+template CipRequest
+  with
+    sales : Party
+    operations : Party
+    provider : Party
+    compliance : Party
+    clientData : ClientData
+  where
+    signatory sales, operations
+    observer provider, compliance
+
+    controller provider can
+      RespondCip : ContractId CipResponse
+        with
+          ssn : Text
+          tin : Text
+          naic : Text
+        do
+          create CipResponse with ..
+
+template CipResponse
+  with
+    sales : Party
+    operations : Party
+    provider : Party
+    compliance : Party
+    clientData : ClientData
+    ssn : Text
+    tin : Text
+    naic : Text
+  where
+    signatory sales, operations, provider
+    observer compliance, sales
+
+    controller sales, compliance can
+      DeleteCip : ()
+        do
+          pure ()
+
+template CddRequest
+  with
+    sales : Party
+    operations : Party
+    provider : Party
+    compliance : Party
+    clientData : ClientData
+  where
+    signatory sales, operations
+    observer provider, compliance
+
+    controller provider can
+      RespondCdd : ContractId CddResponse
+        with
+          isUsPerson : Bool
+          ofacCheck : Bool
+          sanctionsCheck : Bool
+          criminalRecordCheck : Bool
+          mediaCheck : Bool
+        do
+          create CddResponse with ..
+
+template CddResponse
+  with
+    sales : Party
+    operations : Party
+    provider : Party
+    compliance : Party
+    clientData : ClientData
+    isUsPerson : Bool
+    ofacCheck : Bool
+    sanctionsCheck : Bool
+    criminalRecordCheck : Bool
+    mediaCheck : Bool
+  where
+    signatory sales, operations, provider
+    observer compliance
+
+    controller sales, compliance can
+      DeleteCdd : ()
+        do
+          pure ()
+
+template KYCRecord
+  with
+    sales : Party
+    compliance : Party
+    clientData : ClientData
+    cipData : CipResponse
+    cddData : CddResponse
+  where
+    signatory sales, compliance
+
+workflowTest : Script ()
+workflowTest = do
+  sales <- allocatePartyWithHint "Sales" $ PartyIdHint with partyIdHint = "Sales"
+  operations <- allocatePartyWithHint "Operations" $ PartyIdHint with partyIdHint = "Operations"
+  compliance <- allocatePartyWithHint "Compliance" $ PartyIdHint with partyIdHint = "Compliance"
+  provider1 <- allocatePartyWithHint "Provider1" $ PartyIdHint with partyIdHint = "Provider1"
+  provider2 <- allocatePartyWithHint "Provider2" $ PartyIdHint with partyIdHint = "Provider2"
+
+  let clientData = ClientData with name = "Client Name"; address = "Client Address 123"; city = "Zurich"; postalCode = "8001"; country = "Switzerland"
+  kycRequestCid <- submit sales do createCmd KYCRequest with ..
+
+  cipRequestCid <- submit operations do exerciseCmd kycRequestCid RequestCip with provider = provider1
+  cipResponseCid <- submit provider1 do exerciseCmd cipRequestCid RespondCip with ssn = "SSN"; tin = "TIN"; naic = "NAIC"
+
+  cddRequestCid <- submit operations do exerciseCmd kycRequestCid RequestCdd with provider = provider2
+  cddResponseCid <- submit provider2 do exerciseCmd cddRequestCid RespondCdd with isUsPerson = False; ofacCheck = True; sanctionsCheck = True; criminalRecordCheck = True; mediaCheck = True
+
+  kycRecordCid <- submit compliance do exerciseCmd kycRequestCid CompleteOnboarding with ..
+  pure ()

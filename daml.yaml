@@ -1,0 +1,15 @@
+sdk-version: 1.5.0
+name: ex-kyc
+source: daml
+parties:
+  - Alice
+  - Bob
+version: 0.0.1
+start-navigator: false
+sandbox-options:
+  - --ledgerid=ex-kyc
+  - -w
+dependencies:
+  - daml-prim
+  - daml-stdlib
+  - daml-script
